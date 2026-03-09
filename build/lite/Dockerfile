@@ -18,7 +18,7 @@ COPY src/idle.c /tmp/idle.c
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl ca-certificates gcc libc6-dev unzip \
-        iptables redsocks \
+        iptables redsocks iproute2 \
     && mkdir -p $APP_DIR $CONFIG_DIR \
     && if [ -z "$EARNAPP_VERSION" ]; then \
         export EARNAPP_VERSION=$(curl -fsSL $INSTALLER_URL | grep VERSION= | cut -d'"' -f2); \
@@ -37,7 +37,7 @@ RUN apt-get update \
     && curl -fL "$CDN_BASE/$FILE" -o "$BIN_PATH" \
     && chmod +x "$BIN_PATH" \
     && echo "[INFO] EarnApp binary downloaded." \
-    && XRAY_VERSION=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | grep '"tag_name"' | cut -d'"' -f4) \
+    && XRAY_VERSION=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') \
     && if [ -z "$XRAY_VERSION" ]; then echo "[ERROR] Failed to fetch Xray version from GitHub API"; exit 1; fi \
     && echo "[INFO] Installing Xray version $XRAY_VERSION" \
     && case "$TARGETARCH" in \
@@ -64,9 +64,10 @@ RUN echo -e '#!/bin/sh\necho "Distributor ID: Debian"\necho "Description: Debian
 # Fake systemd presence (earnapp scans /proc for system services)
 RUN mkdir -p /run/systemd/system
 
-# Copy entrypoint script
+# Copy entrypoint and loop scripts
 COPY src/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY src/earnapp_loop.sh /usr/local/bin/_earnapp_loop
+RUN chmod +x /entrypoint.sh /usr/local/bin/_earnapp_loop
 
 HEALTHCHECK --interval=1m --timeout=10s --start-period=10s --retries=2 CMD cat /etc/earnapp/status | grep enabled && exit 0 || exit 1
 # Persistent configuration

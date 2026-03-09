@@ -47,7 +47,42 @@ fi
 # 4. Fake systemd markers
 mkdir -p /run/systemd/system
 
-# 5. Spawn dummy background processes to pad the /proc scan
+# 5. Spoof Docker MAC address (02:42:ac:* is a dead giveaway)
+#    Replace with realistic Intel OUI (f8:75:a4) + stable suffix from UUID
+ETH_DEV=$(ip -o link show | awk -F'[: @]+' '/eth0/{print $2}' | head -1)
+if [[ -n "$ETH_DEV" ]]; then
+    CURRENT_MAC=$(cat /sys/class/net/"$ETH_DEV"/address 2>/dev/null || true)
+    if [[ "$CURRENT_MAC" == 02:42:ac:* ]]; then
+        # Generate stable suffix from UUID so MAC doesn't change across restarts
+        MAC_HASH=$(echo -n "$EARNAPP_UUID" | md5sum | cut -c1-6)
+        NEW_MAC="f8:75:a4:${MAC_HASH:0:2}:${MAC_HASH:2:2}:${MAC_HASH:4:2}"
+        ip link set dev "$ETH_DEV" down 2>/dev/null || true
+        ip link set dev "$ETH_DEV" address "$NEW_MAC" 2>/dev/null || true
+        ip link set dev "$ETH_DEV" up 2>/dev/null || true
+    fi
+    unset CURRENT_MAC MAC_HASH NEW_MAC ETH_DEV
+fi
+
+# 6. Mask /proc/mounts and /proc/1/mountinfo (overlay2/docker paths leak)
+if grep -q 'docker\|overlay' /proc/mounts 2>/dev/null; then
+    # Create sanitized mounts that look like a real Debian system
+    sed -e 's|overlay|/dev/sda1|g' \
+        -e 's|/var/lib/docker/overlay2/[^,]*|/|g' \
+        -e 's|workdir=[^,)]*||g' \
+        -e 's|upperdir=[^,)]*||g' \
+        -e 's|lowerdir=[^,)]*||g' \
+        -e 's|,,*|,|g' -e 's|,([ )]|\1|g' \
+        /proc/mounts > /tmp/.fake_mounts 2>/dev/null || true
+    mount --bind /tmp/.fake_mounts /proc/mounts 2>/dev/null || true
+fi
+if [[ -f /proc/1/mountinfo ]] && grep -q 'docker\|overlay' /proc/1/mountinfo 2>/dev/null; then
+    sed -e 's|/var/lib/docker/overlay2/[^ ]*|/dev/sda1|g' \
+        -e 's|overlay|ext4|g' \
+        /proc/1/mountinfo > /tmp/.fake_mountinfo 2>/dev/null || true
+    mount --bind /tmp/.fake_mountinfo /proc/1/mountinfo 2>/dev/null || true
+fi
+
+# 7. Spawn dummy background processes to pad the /proc scan
 #    (earnapp reads /proc/*/cmdline,status,stat for every PID on the system;
 #     a container with only 1-3 processes is an obvious giveaway)
 #    exec -a sets /proc/PID/cmdline; _idle uses prctl(PR_SET_NAME) to set comm
@@ -59,6 +94,12 @@ for _name in "${DUMMY_NAMES[@]}"; do
     (exec -a "$_name" /usr/local/bin/_idle "$_name") &
 done
 unset DUMMY_NAMES _name
+
+# 8. Clean environment variables that leak container info
+#    Docker injects HOME, HOSTNAME, PATH with container-specific values;
+#    also remove our own config vars from the environment
+unset DEBIAN_FRONTEND 2>/dev/null || true
+unset MALLOC_ARENA_MAX 2>/dev/null || true
 
 # --------------------------
 # VLESS proxy setup
@@ -315,35 +356,17 @@ if [[ ! -x "$BIN_PATH" ]]; then
 fi
 
 # --------------------------
-# Start EarnApp with auto-restart loop
+# Clean environment and start EarnApp
 # --------------------------
+# /proc/1/environ is frozen at process start and cannot be unset.
+# Use exec env -i to replace PID 1 with a clean environment, so
+# /proc/self/environ won't leak EARNAPP_UUID, SOCKS5_PROXY, etc.
 echo "[INFO] Starting EarnApp..."
 "$BIN_PATH" stop 2>/dev/null || true
 sleep 1
 
-backoff=5
-MAX_BACKOFF=300
-
-while true; do
-    "$BIN_PATH" start || true
-    sleep 2
-    
-    # Run in foreground, will block until exit
-    start_time=$(date +%s)
-    "$BIN_PATH" run || true
-    run_duration=$(( $(date +%s) - start_time ))
-    
-    # If ran for >60s, it was stable - reset backoff
-    if [[ $run_duration -gt 60 ]]; then
-        backoff=5
-        echo "[INFO] EarnApp exited after ${run_duration}s, restarting in ${backoff}s..."
-    else
-        echo "[WARN] EarnApp crashed after ${run_duration}s, backing off ${backoff}s before restart..."
-        sleep "$backoff"
-        backoff=$((backoff * 2))
-        [[ $backoff -gt $MAX_BACKOFF ]] && backoff=$MAX_BACKOFF
-    fi
-    
-    "$BIN_PATH" stop 2>/dev/null || true
-    sleep 1
-done
+exec env -i \
+    HOME=/root \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    TERM="${TERM:-xterm}" \
+    bash /usr/local/bin/_earnapp_loop "$BIN_PATH"
