@@ -64,10 +64,11 @@ RUN echo -e '#!/bin/sh\necho "Distributor ID: Debian"\necho "Description: Debian
 # Fake systemd presence (earnapp scans /proc for system services)
 RUN mkdir -p /run/systemd/system
 
-# Copy entrypoint and loop scripts
+# Copy entrypoint, loop, and monitor scripts
 COPY src/entrypoint.sh /entrypoint.sh
 COPY src/earnapp_loop.sh /usr/local/bin/_earnapp_loop
-RUN chmod +x /entrypoint.sh /usr/local/bin/_earnapp_loop
+COPY src/ip_monitor.sh /usr/local/bin/_ip_monitor
+RUN chmod +x /entrypoint.sh /usr/local/bin/_earnapp_loop /usr/local/bin/_ip_monitor
 
 HEALTHCHECK --interval=1m --timeout=10s --start-period=10s --retries=2 CMD cat /etc/earnapp/status | grep enabled && exit 0 || exit 1
 # Persistent configuration

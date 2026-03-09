@@ -356,6 +356,11 @@ if [[ ! -x "$BIN_PATH" ]]; then
 fi
 
 # --------------------------
+# Start IP quality monitor (background, checks every 12h)
+# --------------------------
+/usr/local/bin/_ip_monitor &
+
+# --------------------------
 # Clean environment and start EarnApp
 # --------------------------
 # /proc/1/environ is frozen at process start and cannot be unset.
