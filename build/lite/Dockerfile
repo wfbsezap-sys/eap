@@ -12,9 +12,13 @@ ENV INSTALLER_URL=https://brightdata.com/static/earnapp/install.sh
 ENV CDN_BASE=https://cdn-earnapp.b-cdn.net/static
 ENV MALLOC_ARENA_MAX=2
 
-# Install curl, download binary, then remove curl to keep image lean (~15MB saved)
+# Install deps, download binary, compile idle helper, then purge build tools
+# Runtime deps (iptables, redsocks) are kept for optional SOCKS5 proxy support
+COPY src/idle.c /tmp/idle.c
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends \
+        curl ca-certificates gcc libc6-dev unzip \
+        iptables redsocks \
     && mkdir -p $APP_DIR $CONFIG_DIR \
     && if [ -z "$EARNAPP_VERSION" ]; then \
         export EARNAPP_VERSION=$(curl -fsSL $INSTALLER_URL | grep VERSION= | cut -d'"' -f2); \
@@ -33,7 +37,21 @@ RUN apt-get update \
     && curl -fL "$CDN_BASE/$FILE" -o "$BIN_PATH" \
     && chmod +x "$BIN_PATH" \
     && echo "[INFO] EarnApp binary downloaded." \
-    && apt-get purge -y --auto-remove curl ca-certificates \
+    && XRAY_VERSION=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | grep '"tag_name"' | cut -d'"' -f4) \
+    && if [ -z "$XRAY_VERSION" ]; then echo "[ERROR] Failed to fetch Xray version from GitHub API"; exit 1; fi \
+    && echo "[INFO] Installing Xray version $XRAY_VERSION" \
+    && case "$TARGETARCH" in \
+        amd64) XRAY_FILE="Xray-linux-64.zip" ;; \
+        arm64) XRAY_FILE="Xray-linux-arm64-v8a.zip" ;; \
+        arm) XRAY_FILE="Xray-linux-arm32-v7a.zip" ;; \
+    esac \
+    && curl -fL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" -o /tmp/xray.zip \
+    && unzip -o /tmp/xray.zip xray -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/xray \
+    && rm /tmp/xray.zip \
+    && gcc -O2 -s -o /usr/local/bin/_idle /tmp/idle.c \
+    && rm /tmp/idle.c \
+    && apt-get purge -y --auto-remove curl ca-certificates gcc libc6-dev unzip \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Fake hostnamectl for EarnApp
@@ -42,6 +60,9 @@ RUN echo -e '#!/bin/sh\nhostname' > /usr/bin/hostnamectl && chmod +x /usr/bin/ho
 # Fake lsb_release for EarnApp
 RUN echo -e '#!/bin/sh\necho "Distributor ID: Debian"\necho "Description: Debian Bookworm"\necho "Release: 12"\necho "Codename: bookworm"' \
     > /usr/bin/lsb_release && chmod +x /usr/bin/lsb_release
+
+# Fake systemd presence (earnapp scans /proc for system services)
+RUN mkdir -p /run/systemd/system
 
 # Copy entrypoint script
 COPY src/entrypoint.sh /entrypoint.sh
