@@ -260,6 +260,29 @@ REOF
 
     echo "[INFO] iptables rules configured, all TCP traffic routed through SOCKS5 proxy"
 
+    # Check exit IP through proxy chain
+    EXIT_IP_INFO=$(timeout 15 bash -c '
+        exec 3<>/dev/tcp/ip-api.com/80
+        echo -e "GET /json?fields=query,country,city,isp,hosting,proxy HTTP/1.1\r\nHost: ip-api.com\r\nConnection: close\r\n\r\n" >&3
+        cat <&3
+        exec 3>&-
+    ' 2>/dev/null | tail -1) || true
+    if [[ -n "$EXIT_IP_INFO" ]]; then
+        EXIT_IP=$(echo "$EXIT_IP_INFO" | grep -o '"query":"[^"]*"' | cut -d'"' -f4)
+        EXIT_COUNTRY=$(echo "$EXIT_IP_INFO" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
+        EXIT_CITY=$(echo "$EXIT_IP_INFO" | grep -o '"city":"[^"]*"' | cut -d'"' -f4)
+        EXIT_ISP=$(echo "$EXIT_IP_INFO" | grep -o '"isp":"[^"]*"' | cut -d'"' -f4)
+        EXIT_HOSTING=$(echo "$EXIT_IP_INFO" | grep -o '"hosting":[a-z]*' | cut -d: -f2)
+        EXIT_PROXY=$(echo "$EXIT_IP_INFO" | grep -o '"proxy":[a-z]*' | cut -d: -f2)
+        if [[ "$EXIT_HOSTING" == "true" || "$EXIT_PROXY" == "true" ]]; then
+            IP_TYPE="datacenter/VPN"
+        else
+            IP_TYPE="residential"
+        fi
+        echo "[INFO] Exit IP: ${EXIT_IP} (${EXIT_COUNTRY}, ${EXIT_CITY}) - ${EXIT_ISP} [${IP_TYPE}]"
+        unset EXIT_IP_INFO EXIT_IP EXIT_COUNTRY EXIT_CITY EXIT_ISP EXIT_HOSTING EXIT_PROXY IP_TYPE
+    fi
+
     # Clean up sensitive vars
     unset PROXY_STR PROXY_AUTH PROXY_USER PROXY_PASS PROXY_HOST PROXY_PORT
 fi
