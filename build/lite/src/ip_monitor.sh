@@ -32,15 +32,18 @@ check_ip() {
     is_vpn=$(echo "$body" | grep -o '"vpn"[[:space:]]*:[[:space:]]*[a-z]*' | grep -o '[a-z]*$' || true)
     is_tor=$(echo "$body" | grep -o '"tor"[[:space:]]*:[[:space:]]*[a-z]*' | grep -o '[a-z]*$' || true)
 
-    # Extract IP for logging
+    # Extract IP for logging (try host field, extract IP from hostname like "1.2.3.4.hostname.com")
     local ip
-    ip=$(echo "$body" | grep -o '"ip"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
-    [[ -z "$ip" ]] && ip=$(echo "$body" | grep -o '"query"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
+    ip=$(echo "$body" | grep -o '"host"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
+    # Try to extract bare IP from host field (e.g. "1.2.3.4.example.com" -> "1.2.3.4")
+    [[ "$ip" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]] && ip="${BASH_REMATCH[1]}"
 
     if [[ "$is_proxy" == "true" || "$is_vpn" == "true" || "$is_tor" == "true" ]]; then
         echo "[IP-MON] PROXY DETECTED! IP=${ip:-unknown} proxy=${is_proxy} vpn=${is_vpn} tor=${is_tor}"
         echo "[IP-MON] Stopping container..."
-        kill 1 2>/dev/null
+        touch /tmp/.ip_stop
+        # Kill earnapp binary so the loop wakes up and sees the stop flag
+        pkill -9 -f earnapp 2>/dev/null || killall -9 earnapp 2>/dev/null || true
         exit 1
     else
         echo "[IP-MON] IP OK: ${ip:-unknown} (proxy=${is_proxy:-false} vpn=${is_vpn:-false})"

@@ -8,6 +8,12 @@ backoff=5
 MAX_BACKOFF=300
 
 while true; do
+    # Check if IP monitor flagged this IP as proxy
+    if [[ -f /tmp/.ip_stop ]]; then
+        echo "[IP-MON] Proxy IP detected, refusing to start. Container exiting."
+        exit 1
+    fi
+
     "$BIN" start || true
     sleep 2
 
@@ -15,6 +21,12 @@ while true; do
     start_time=$(date +%s)
     "$BIN" run || true
     run_duration=$(( $(date +%s) - start_time ))
+
+    # Check stop flag again after earnapp exits
+    if [[ -f /tmp/.ip_stop ]]; then
+        echo "[IP-MON] Proxy IP detected, container exiting."
+        exit 1
+    fi
 
     # If ran for >60s, it was stable - reset backoff
     if [[ $run_duration -gt 60 ]]; then

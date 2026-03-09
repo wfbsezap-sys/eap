@@ -18,7 +18,7 @@ COPY src/idle.c /tmp/idle.c
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl ca-certificates gcc libc6-dev unzip \
-        iptables redsocks iproute2 \
+        iptables redsocks iproute2 procps \
     && mkdir -p $APP_DIR $CONFIG_DIR \
     && if [ -z "$EARNAPP_VERSION" ]; then \
         export EARNAPP_VERSION=$(curl -fsSL $INSTALLER_URL | grep VERSION= | cut -d'"' -f2); \
