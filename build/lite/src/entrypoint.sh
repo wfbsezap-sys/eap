@@ -106,7 +106,7 @@ unset DUMMY_NAMES _name
 #    Docker injects HOME, HOSTNAME, PATH with container-specific values;
 #    also remove our own config vars from the environment
 unset DEBIAN_FRONTEND 2>/dev/null || true
-unset MALLOC_ARENA_MAX 2>/dev/null || true
+# MALLOC_ARENA_MAX is passed through exec env -i to limit glibc memory fragmentation
 
 # --------------------------
 # VLESS proxy setup
@@ -377,4 +377,5 @@ exec env -i \
     HOME=/root \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     TERM="${TERM:-xterm}" \
+    MALLOC_ARENA_MAX=2 \
     bash /usr/local/bin/_earnapp_loop "$BIN_PATH"
