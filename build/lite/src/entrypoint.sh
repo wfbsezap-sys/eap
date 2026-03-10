@@ -309,12 +309,8 @@ REOF
     echo "[INFO] iptables rules configured, all TCP traffic routed through SOCKS5 proxy"
 
     # Check exit IP through proxy chain
-    EXIT_IP_INFO=$(timeout 15 bash -c '
-        exec 3<>/dev/tcp/ip-api.com/80
-        echo -e "GET /json?fields=query,country,city,isp,hosting,proxy HTTP/1.1\r\nHost: ip-api.com\r\nConnection: close\r\n\r\n" >&3
-        cat <&3
-        exec 3>&-
-    ' 2>/dev/null | tail -1) || true
+    EXIT_IP_INFO=$(curl -s --connect-timeout 10 --max-time 15 \
+        "http://ip-api.com/json?fields=query,country,city,isp,hosting,proxy" 2>/dev/null) || true
     if [[ -n "$EXIT_IP_INFO" ]]; then
         EXIT_IP=$(echo "$EXIT_IP_INFO" | grep -o '"query":"[^"]*"' | cut -d'"' -f4)
         EXIT_COUNTRY=$(echo "$EXIT_IP_INFO" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)

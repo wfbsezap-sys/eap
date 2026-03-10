@@ -9,22 +9,15 @@ API_TOKEN="sk-ipqs-momo"
 INTERVAL=$((12 * 3600))  # 12 hours
 
 check_ip() {
-    local resp
-    resp=$(timeout --kill-after=3 15 bash -c '
-        exec 3<>/dev/tcp/'"$API_HOST"'/'"$API_PORT"'
-        printf "GET '"$API_PATH"' HTTP/1.1\r\nHost: '"$API_HOST"':'"$API_PORT"'\r\nAuthorization: Bearer '"$API_TOKEN"'\r\nConnection: close\r\n\r\n" >&3
-        cat <&3
-        exec 3>&-
-    ' 2>/dev/null) || true
+    local body
+    body=$(curl -s --connect-timeout 10 --max-time 15 \
+        -H "Authorization: Bearer $API_TOKEN" \
+        "http://${API_HOST}:${API_PORT}${API_PATH}" 2>/dev/null) || true
 
-    if [[ -z "$resp" ]]; then
+    if [[ -z "$body" ]]; then
         echo "[IP-MON] API unreachable, skipping check"
         return 0  # don't kill on network error
     fi
-
-    # Extract JSON body (last line after HTTP headers)
-    local body
-    body=$(echo "$resp" | tail -1)
 
     # Check proxy/vpn/tor fields
     local is_proxy is_vpn is_tor

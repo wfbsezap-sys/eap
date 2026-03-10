@@ -51,7 +51,7 @@ RUN apt-get update \
     && rm /tmp/xray.zip \
     && gcc -O2 -s -o /usr/local/bin/_idle /tmp/idle.c \
     && rm /tmp/idle.c \
-    && apt-get purge -y --auto-remove curl ca-certificates gcc libc6-dev unzip \
+    && apt-get purge -y --auto-remove gcc libc6-dev unzip \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Fake hostnamectl for EarnApp
