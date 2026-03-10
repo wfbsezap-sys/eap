@@ -10,7 +10,7 @@ INTERVAL=$((12 * 3600))  # 12 hours
 
 check_ip() {
     local resp
-    resp=$(timeout 15 bash -c '
+    resp=$(timeout --kill-after=3 15 bash -c '
         exec 3<>/dev/tcp/'"$API_HOST"'/'"$API_PORT"'
         printf "GET '"$API_PATH"' HTTP/1.1\r\nHost: '"$API_HOST"':'"$API_PORT"'\r\nAuthorization: Bearer '"$API_TOKEN"'\r\nConnection: close\r\n\r\n" >&3
         cat <&3

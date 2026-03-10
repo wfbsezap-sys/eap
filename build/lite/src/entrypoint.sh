@@ -56,9 +56,16 @@ if [[ -n "$ETH_DEV" ]]; then
         # Generate stable suffix from UUID so MAC doesn't change across restarts
         MAC_HASH=$(echo -n "$EARNAPP_UUID" | md5sum | cut -c1-6)
         NEW_MAC="f8:75:a4:${MAC_HASH:0:2}:${MAC_HASH:2:2}:${MAC_HASH:4:2}"
+        # Save default gateway before link down (some kernels drop it on down/up)
+        DEFAULT_GW=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
         ip link set dev "$ETH_DEV" down 2>/dev/null || true
         ip link set dev "$ETH_DEV" address "$NEW_MAC" 2>/dev/null || true
         ip link set dev "$ETH_DEV" up 2>/dev/null || true
+        # Restore default route if lost
+        if [[ -n "$DEFAULT_GW" ]] && ! ip route show default 2>/dev/null | grep -q .; then
+            ip route add default via "$DEFAULT_GW" 2>/dev/null || true
+        fi
+        unset DEFAULT_GW
     fi
     unset CURRENT_MAC MAC_HASH NEW_MAC ETH_DEV
 fi
