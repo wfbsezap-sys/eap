@@ -1,4 +1,4 @@
-FROM debian:stable-slim@sha256:85dfcffff3c1e193877f143d05eaba8ae7f3f95cb0a32e0bc04a448077e1ac69
+FROM debian:stable-slim
 
 ARG TARGETARCH
 ARG TARGETVARIANT
@@ -13,12 +13,11 @@ ENV CDN_BASE=https://cdn-earnapp.b-cdn.net/static
 ENV MALLOC_ARENA_MAX=2
 
 # Install deps, download binary, compile idle helper, then purge build tools
-# Runtime deps (iptables, redsocks) are kept for optional SOCKS5 proxy support
 COPY src/idle.c /tmp/idle.c
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl ca-certificates gcc libc6-dev unzip \
-        iptables redsocks iproute2 procps \
+        curl ca-certificates gcc libc6-dev \
+        tini iproute2 procps \
     && mkdir -p $APP_DIR $CONFIG_DIR \
     && if [ -z "$EARNAPP_VERSION" ]; then \
         export EARNAPP_VERSION=$(curl -fsSL $INSTALLER_URL | grep VERSION= | cut -d'"' -f2); \
@@ -37,21 +36,9 @@ RUN apt-get update \
     && curl -fL "$CDN_BASE/$FILE" -o "$BIN_PATH" \
     && chmod +x "$BIN_PATH" \
     && echo "[INFO] EarnApp binary downloaded." \
-    && XRAY_VERSION=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') \
-    && if [ -z "$XRAY_VERSION" ]; then echo "[ERROR] Failed to fetch Xray version from GitHub API"; exit 1; fi \
-    && echo "[INFO] Installing Xray version $XRAY_VERSION" \
-    && case "$TARGETARCH" in \
-        amd64) XRAY_FILE="Xray-linux-64.zip" ;; \
-        arm64) XRAY_FILE="Xray-linux-arm64-v8a.zip" ;; \
-        arm) XRAY_FILE="Xray-linux-arm32-v7a.zip" ;; \
-    esac \
-    && curl -fL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" -o /tmp/xray.zip \
-    && unzip -o /tmp/xray.zip xray -d /usr/local/bin/ \
-    && chmod +x /usr/local/bin/xray \
-    && rm /tmp/xray.zip \
     && gcc -O2 -s -o /usr/local/bin/_idle /tmp/idle.c \
     && rm /tmp/idle.c \
-    && apt-get purge -y --auto-remove gcc libc6-dev unzip \
+    && apt-get purge -y --auto-remove gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Fake hostnamectl for EarnApp
@@ -70,10 +57,13 @@ COPY src/earnapp_loop.sh /usr/local/bin/_earnapp_loop
 COPY src/ip_monitor.sh /usr/local/bin/_ip_monitor
 RUN chmod +x /entrypoint.sh /usr/local/bin/_earnapp_loop /usr/local/bin/_ip_monitor
 
-HEALTHCHECK --interval=1m --timeout=10s --start-period=10s --retries=2 CMD cat /etc/earnapp/status | grep enabled && exit 0 || exit 1
+HEALTHCHECK --interval=1m --timeout=10s --start-period=30s --retries=3 \
+    CMD pgrep -x earnapp > /dev/null && \
+        test "$(cat /etc/earnapp/status 2>/dev/null)" != "" || exit 1
+
 # Persistent configuration
 VOLUME ["/etc/earnapp"]
 
-# Entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+# Use tini as PID 1 for proper signal handling and zombie reaping
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.sh"]
 CMD ["run"]

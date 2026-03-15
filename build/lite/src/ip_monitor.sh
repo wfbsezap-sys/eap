@@ -2,11 +2,26 @@
 # IP quality monitor - checks every 12h, kills container if proxy detected
 set -uo pipefail
 
-API_HOST="23.106.46.135"
-API_PORT="8066"
-API_PATH="/api/json/ip"
-API_TOKEN="sk-ipqs-momo"
+API_HOST="${IPMON_API_HOST:-23.106.46.135}"
+API_PORT="${IPMON_API_PORT:-8066}"
+API_PATH="${IPMON_API_PATH:-/api/json/ip}"
+API_TOKEN="${IPMON_API_TOKEN:-sk-ipqs-momo}"
 INTERVAL=$((12 * 3600))  # 12 hours
+
+# Lightweight JSON string field extractor (no jq dependency)
+# Usage: json_str 'fieldname' <<< "$json"
+# Handles: "field": "value" and "field" : "value" (with optional spaces)
+json_str() {
+    local key="$1"
+    sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
+}
+
+# Lightweight JSON bool/number field extractor
+# Usage: json_val 'fieldname' <<< "$json"
+json_val() {
+    local key="$1"
+    sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*\([a-z0-9.]*\).*/\1/p' | head -1
+}
 
 check_ip() {
     local body
@@ -21,22 +36,21 @@ check_ip() {
 
     # Check proxy/vpn/tor fields
     local is_proxy is_vpn is_tor
-    is_proxy=$(echo "$body" | grep -o '"proxy"[[:space:]]*:[[:space:]]*[a-z]*' | grep -o '[a-z]*$' || true)
-    is_vpn=$(echo "$body" | grep -o '"vpn"[[:space:]]*:[[:space:]]*[a-z]*' | grep -o '[a-z]*$' || true)
-    is_tor=$(echo "$body" | grep -o '"tor"[[:space:]]*:[[:space:]]*[a-z]*' | grep -o '[a-z]*$' || true)
+    is_proxy=$(json_val proxy <<< "$body")
+    is_vpn=$(json_val vpn <<< "$body")
+    is_tor=$(json_val tor <<< "$body")
 
     # Extract IP and location for logging
     local ip isp city country
-    ip=$(echo "$body" | grep -o '"host"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
+    ip=$(json_str host <<< "$body")
     # Extract bare IP if host starts with digits (e.g. "1.2.3.4.example.com")
     if [[ "$ip" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
         ip="${BASH_REMATCH[1]}"
-    else
-        ip="$ip"
     fi
-    isp=$(echo "$body" | grep -o '"ISP"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
-    city=$(echo "$body" | grep -o '"city"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
-    country=$(echo "$body" | grep -o '"country_code"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
+    isp=$(json_str ISP <<< "$body")
+    city=$(json_str city <<< "$body")
+    country=$(json_str country_code <<< "$body")
+
     local label="${ip:-unknown}"
     [[ -n "$city" || -n "$country" ]] && label="$label (${city:+$city, }${country:-})"
     [[ -n "$isp" ]] && label="$label - $isp"
